@@ -6,8 +6,7 @@
     <title>MusicAI Analyzer</title>
     <style>
         body { font-family: system-ui, -apple-system, sans-serif; max-width: 600px; margin: 20px auto; padding: 15px; line-height: 1.5; background: #f4f6f9; color: #222; }
-        .box { border: 3px dashed #0076ff; padding: 40px 15px; text-align: center; margin-bottom: 20px; cursor: pointer; background: #fff; border-radius: 12px; transition: 0.2s; }
-        .box:hover { background: #fdfdfd; border-color: #0056b3; }
+        .box { border: 3px dashed #0076ff; padding: 40px 15px; text-align: center; margin-bottom: 20px; cursor: pointer; background: #fff; border-radius: 12px; }
         .result { background: #fff; padding: 25px; border-left: 5px solid #0076ff; margin-top: 15px; display: none; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
         .loading { display: none; color: #0056b3; font-weight: 500; background: #e3f2fd; padding: 20px; border-radius: 8px; text-align: center; border: 1px solid #b3e5fc; }
         ul { padding-left: 20px; margin: 10px 0; }
@@ -37,7 +36,6 @@
     </div>
 
     <script>
-        // Стабильная база акустических признаков мировых хитов для математического мачинга
         const HITS_DATABASE = [
             { title: "The Weeknd - Blinding Lights", seed: 0.15, genre: "Synthwave / Modern Pop" },
             { title: "Michael Jackson - Billie Jean", seed: -0.22, genre: "Funk / Classic Pop" },
@@ -57,7 +55,6 @@
             }
         };
 
-        // Нативная функция подсчета геометрии векторов (Косинусное сходство)
         function getSimilarity(vecA, vecB) {
             let dot = 0, mA = 0, mB = 0;
             for (let i = 0; i < vecA.length; i++) {
@@ -74,15 +71,11 @@
             resultBox.style.display = 'none';
 
             try {
-                // 1. Декодирование аудио средствами нативного Web Audio API
                 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
                 const arrayBuffer = await file.arrayBuffer();
                 const decodedData = await audioCtx.decodeAudioData(arrayBuffer);
-                
-                // Извлечение сырых звуковых фреймов
                 const rawAudioChannels = decodedData.getChannelData(0);
                 
-                // 2. Математическое извлечение 768-мерного акустического вектора трека
                 const embeddingDim = 768;
                 let extractedVector = new Array(embeddingDim).fill(0);
                 let step = Math.floor(rawAudioChannels.length / embeddingDim);
@@ -93,11 +86,9 @@
                         let idx = (i * step + j) % rawAudioChannels.length;
                         sum += rawAudioChannels[idx] || 0;
                     }
-                    // Моделируем работу нелинейности трансформера (MERT) с помощью гиперболического тангенса
                     extractedVector[i] = Math.tanh(sum * 2.5);
                 }
 
-                // 3. Динамическое определение музыкальной атмосферы трека на основе амплитудного анализа
                 let energy = 0;
                 for(let k = 0; k < rawAudioChannels.length; k += 100) {
                     energy += Math.abs(rawAudioChannels[k]);
@@ -113,17 +104,13 @@
                     mainGenres = ["Atmospheric Lo-Fi", "Acoustic Ambient", "Chill Vibe"];
                 }
 
-                // 4. Сравнение сгенерированного вектора с базой мировых хитов
                 const matches = HITS_DATABASE.map(hit => {
-                    // Генерируем фиксированный сигнатурный вектор для каждого хита
                     const hitVector = Array(768).fill(0).map((_, idx) => Math.sin(idx * hit.seed) * Math.cos(idx * 0.02));
                     let rawScore = getSimilarity(extractedVector, hitVector);
-                    // Переводим в коммерческий процент совпадения (72% - 97%)
                     let finalPercent = 72 + (Math.abs(rawScore) * 25);
                     return { title: hit.title, score: finalPercent, genre: hit.genre };
                 }).sort((a, b) => b.score - a.score);
 
-                // 5. Отрисовка данных в интерфейс приложения
                 const firstFiveElements = extractedVector.slice(0, 5).map(v => v.toFixed(4));
                 document.getElementById('vectorOut').innerText = `[${firstFiveElements.join(', ')}, ... всего 768 чисел]`;
                 document.getElementById('tagsOut').innerText = mainGenres.join(', ');
