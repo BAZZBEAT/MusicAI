@@ -46,7 +46,7 @@
         const resultBox = document.getElementById('resultBox');
 
         dropZone.onclick = () => fileInput.click();
-        fileInput.onchange = (e) => handleAudio(e.target.files[0]);
+        fileInput.onchange = (e) => handleAudio(e.target.files);
 
         function cosineSimilarity(vecA, vecB) {
             let dotProduct = 0.0, normA = 0.0, normB = 0.0;
@@ -59,13 +59,13 @@
         }
 
         async function handleAudio(file) {
-            if (!file) return;
+            if (!file || file.length === 0) return;
             loadingText.style.display = 'block';
             resultBox.style.display = 'none';
 
             try {
                 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                const arrayBuffer = await file.arrayBuffer();
+                const arrayBuffer = await file[0].arrayBuffer();
                 const decodedData = await audioCtx.decodeAudioData(arrayBuffer);
                 
                 const offlineCtx = new OfflineAudioContext(1, decodedData.duration * 16000, 16000);
@@ -91,7 +91,7 @@
                 }
                 meanVector = meanVector.map(v => v / numFrames);
 
-                const classifier = await pipeline('audio-classification', 'huyleit/mert-v1-95m-music-emotion-int8');
+                const classifier = await pipeline('audio-classification', 'Xenova/mert-v1-95m-music-emotion');
                 const predictions = await classifier(audioRawData);
                 const topTags = predictions.slice(0, 3).map(p => p.label);
 
@@ -116,9 +116,10 @@
 
             } catch (err) {
                 alert("Ошибка обработки: " + err.message);
+                console.error(err);
                 loadingText.style.display = 'none';
             }
         }
     </script>
 </body>
-</html> 
+</html>
