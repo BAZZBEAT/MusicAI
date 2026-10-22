@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>AI Music Analyzer</title>
+    <style>
+        body { font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; line-height: 1.6; }
+        .box { border: 2px dashed #ccc; padding: 20px; text-align: center; margin-bottom: 20px; cursor: pointer; }
+        .result { background: #f9f9f9; padding: 15px; border-left: 4px solid #0076ff; margin-top: 15px; display: none; }
+        .loading { display: none; color: #666; font-style: italic; }
+    </style>
+</head>
+<body>
+
+    <h2>Анализатор треков (MERT AI)</h2>
+    <p>Загрузите ваш трек, чтобы извлечь вектор, теги, художественное описание и найти совпадения с хитами.</p>
+
+    <div class="box" id="dropZone">
+        <input type="file" id="audioFile" accept="audio/*" style="display:none">
+        <p>Нажмите сюда или перетащите аудиофайл (.mp3, .wav)</p>
+    </div>
+
+    <div class="loading" id="loadingText">Инициализация AI и анализ трека (первый запуск может занять около минуты)...</div>
+
+    <div class="result" id="resultBox">
+        <h3>📊 Результаты анализа:</h3>
+        <p><strong>Мерт-Вектор (первые 5 чисел из 768):</strong> <span id="vectorOut"></span></p>
+        <p><strong>🏷️ Жанровые теги / Настроение:</strong> <span id="tagsOut"></span></p>
+        <p><strong>✍️ Художественное описание:</strong> <span id="descOut"></span></p>
+        <p><strong>🔥 Совпадение с известными хитами:</strong></p>
+        <ul id="hitsOut"></ul>
+    </div>
+
+    <!-- Подключаем Transformers.js напрямую из CDN -->
+    <script type="module">
+        import { pipeline, AutoTokenizer, LlamaForCausalLM } from 'https://jsdelivr.net';
+
+        // Имитация базы данных векторов хитов (в реальном проекте загружается из hits_db.json)
+        const HITS_DATABASE = [
+            { title: "Billie Jean - Michael Jackson", vector: Array(768).fill(0).map(() => Math.random() - 0.5) },
+            { title: "Blinding Lights - The Weeknd", vector: Array(768).fill(0).map(() => Math.random() - 0.5) },
+            { title: "Shape of You - Ed Sheeran", vector: Array(768).fill(0).map(() => Math.random() - 0.5) }
+        ];
+
+        const fileInput = document.getElementById('audioFile');
+        const dropZone = document.getElementById('dropZone');
+        const loadingText = document.getElementById('loadingText');
+        const resultBox = document.getElementById('resultBox');
+
+        dropZone.onclick = () => fileInput.click();
+        fileInput.onchange = (e) => handleAudio(e.target.files[0]);
+
+        // Функция подсчета косинусного сходства между векторами
+        function cosineSimilarity(vecA, vecB) {
+            let dotProduct = 0.0, normA = 0.0, normB = 0.0;
+            for (let i = 0; i < vecA.length; i++) {
+                dotProduct += vecA[i] * vecB[i];
+                normA += vecA[i] * vecA[i];
+                normB += vecB[i] * vecB[i];
+            }
+            return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+        }
+
+        async function handleAudio(file) {
+            if (!file) return;
+            loadingText.style.display = 'block';
+            resultBox.style.style = 'none';
+
+            try {
+                // 1. Декодирование и ресемплинг аудио средствами Web Audio API в 16кГц
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const arrayBuffer = await file.arrayBuffer();
+                const decodedData = await audioCtx.decodeAudioData(arrayBuffer);
+                
+                const offlineCtx = new OfflineAudioContext(1, decodedData.duration * 16000, 16000);
+                const source = offlineCtx.createBufferSource();
+                source.buffer = decodedData;
+                source.connect(offlineCtx.destination);
+                source.start();
+                const renderedBuffer = await offlineCtx.startRendering();
+                const audioRawData = renderedBuffer.getChannelData(0); // Получили чистый Float32Array
+
+                // 2. Извлечение точного эмбеддинга (MERT Feature Extraction)
+                // Используем квантованную (сжатую) модель для экономии памяти
+                const extractor = await pipeline('feature-extraction', 'Xenova/MERT-v1-95M', { quantized: true });
+                const output = await extractor(audioRawData);
+                
+                // Превращаем трехмерный выход трансформера в один стабильный плоский вектор (Mean Pooling)
+                const rawVector = output.data; // Одномерный массив всех фреймов
+                const numFrames = output.shape[1];
+                const embeddingDim = output.shape[2]; // 768
+                
+                let meanVector = new Array(embeddingDim).fill(0);
+                for (let f = 0; f < numFrames; f++) {
+                    for (let d = 0; d < embeddingDim; d++) {
+                        meanVector[d] += rawVector[f * embeddingDim + d];
+                    }
+                }
+                meanVector = meanVector.map(v => v / numFrames); // Наш финальный точный вектор!
+
+                // 3. Извлечение тегов и жанров через классификатор на базе MERT
+                const classifier = await pipeline('audio-classification', 'huyleit/mert-v1-95m-music-emotion-int8');
+                const predictions = await classifier(audioRawData);
+                const topTags = predictions.slice(0, 3).map(p => p.label);
+
+                // 4. Поиск совпадений с базой хитов
+                const matches = HITS_DATABASE.map(hit => {
+                    return { title: hit.title, score: cosineSimilarity(meanVector, hit.vector) };
+                }).sort((a, b) => b.score - a.score);
+
+                // 5. Генерация качественного описания по тегам (Шаблонный генератор для скорости)
+                // Мы склеиваем теги и топ-хит для формирования "художественного" заключения без тяжелых LLM
+                const bestMatch = matches[0].title;
+                const description = `Этот трек представляет собой глубокую звуковую композицию с выраженными элементами стилей (${topTags.join(', ')}). Музыкальная структура и динамический диапазон обладают высокой плотностью звука, создавая атмосферное и кинематографичное настроение. По своим акустическим свойствам и частотному балансу трек имеет сильное сходство с композицией "${bestMatch}".`;
+
+                // Вывод результатов на экран
+                document.getElementById('vectorOut').innerText = JSON.stringify(meanVector.slice(0, 5)) + "...";
+                document.getElementById('tagsOut').innerText = topTags.join(', ');
+                document.getElementById('descOut').innerText = description;
+                
+                const hitsList = document.getElementById('hitsOut');
+                hitsList.innerHTML = '';
+                matches.forEach(match => {
+                    const li = document.createElement('li');
+                    li.innerText = `${match.title} — совпадение ${(match.score * 100).toFixed(1)}%`;
+                    hitsList.appendChild(li);
+                });
+
+                loadingText.style.display = 'none';
+                resultBox.style.display = 'block';
+
+            } catch (err) {
+                alert("Ошибка обработки: " + err.message);
+                loadingText.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>
