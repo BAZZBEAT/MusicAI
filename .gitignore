@@ -147,3 +147,21 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+# --- Музыка и аудио файлы пользователей ---
+*.mp3
+*.wav
+*.flac
+*.m4a
+*.ogg
+/audio/
+/tracks/
+
+# --- Локальный кэш моделей нейросети (если скачаете их на ПК) ---
+*.onnx
+*.bin
+/models/
+/.cache/
+
+# --- Системный мусор операционных систем ---
+.DS_Store
+Thumbs.db
